@@ -445,6 +445,61 @@ jobs:
         if: true && !contains(github.event.inputs.skiptests, 'cluster')
         run: |
           ./runtest-cluster ${{github.event.inputs.cluster_test_args}}
+  test-ubuntu-cmake-tls:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'schedule' && github.repository == 'valkey-io/valkey') ||
+        (github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'unstable') ||
+        (github.event_name == 'pull_request_target' && github.event.label.name == 'run-extra-tests')) &&
+      !contains(github.event.inputs.skipjobs, 'tls')
+    timeout-minutes: 1440
+    steps:
+      - name: prep
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
+        run: |
+          echo "GITHUB_REPOSITORY=${{inputs.use_repo || github.event.inputs.use_repo}}" >> $GITHUB_ENV
+          echo "GITHUB_HEAD_REF=${{inputs.use_git_ref || github.event.inputs.use_git_ref}}" >> $GITHUB_ENV
+          echo "skipjobs: ${{github.event.inputs.skipjobs}}"
+          echo "skiptests: ${{github.event.inputs.skiptests}}"
+          echo "test_args: ${{github.event.inputs.test_args}}"
+          echo "cluster_test_args: ${{github.event.inputs.cluster_test_args}}"
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          repository: ${{ env.GITHUB_REPOSITORY }}
+          ref: ${{ env.GITHUB_HEAD_REF }}
+      - name: cmake and make
+        run: |
+          sudo apt-get install -y cmake libssl-dev
+          mkdir -p build-release
+          cd build-release
+          cmake -DCMAKE_BUILD_TYPE=Release .. -DBUILD_TLS=yes -DBUILD_UNIT_TESTS=yes
+          make -j$(nproc)
+      - name: testprep
+        run: |
+          sudo apt-get install tcl8.6 tclx tcl-tls
+          ./utils/gen-test-certs.sh
+          ln -sf $(pwd)/build-release/bin/valkey-server $(pwd)/src/valkey-server
+          ln -sf $(pwd)/build-release/bin/valkey-cli $(pwd)/src/valkey-cli
+          ln -sf $(pwd)/build-release/bin/valkey-benchmark $(pwd)/src/valkey-benchmark
+          ln -sf $(pwd)/build-release/bin/valkey-server $(pwd)/src/valkey-check-aof
+          ln -sf $(pwd)/build-release/bin/valkey-server $(pwd)/src/valkey-check-rdb
+          ln -sf $(pwd)/build-release/bin/valkey-server $(pwd)/src/valkey-sentinel
+      - name: test
+        if: true && !contains(github.event.inputs.skiptests, 'valkey')
+        run: ./runtest ${{ github.event_name != 'pull_request' && '--accurate' || '' }} --verbose --dump-logs --tls ${{github.event.inputs.test_args}}
+      - name: module api test
+        if: true && !contains(github.event.inputs.skiptests, 'modules')
+        run: CFLAGS='-Werror' ./runtest-moduleapi --verbose --dump-logs --tls ${{github.event.inputs.test_args}}
+      - name: sentinel tests
+        if: true && !contains(github.event.inputs.skiptests, 'sentinel')
+        run: ./runtest-sentinel --tls ${{github.event.inputs.cluster_test_args}}
+      - name: cluster tests
+        if: true && !contains(github.event.inputs.skiptests, 'cluster')
+        run: ./runtest-cluster --tls ${{github.event.inputs.cluster_test_args}}
+      - name: unittest
+        if: true && !contains(github.event.inputs.skiptests, 'unittest')
+        run: ./build-release/bin/valkey-unit-tests --accurate
   test-ubuntu-io-threads:
     runs-on: ubuntu-latest
     if: |
@@ -1410,6 +1465,7 @@ jobs:
       - test-ubuntu-32bit
       - test-ubuntu-tls
       - test-ubuntu-tls-no-tls
+      - test-ubuntu-cmake-tls
       - test-ubuntu-io-threads
       - test-ubuntu-tls-io-threads
       - test-ubuntu-reclaim-cache
@@ -1450,6 +1506,7 @@ jobs:
       - test-ubuntu-32bit
       - test-ubuntu-tls
       - test-ubuntu-tls-no-tls
+      - test-ubuntu-cmake-tls
       - test-ubuntu-io-threads
       - test-ubuntu-tls-io-threads
       - test-ubuntu-reclaim-cache
