@@ -865,6 +865,25 @@ start_server {tags {"hash"}} {
         }
     }
 
+
+    # The following test can only be executed if we don't use Valgrind, and if
+    # we are using x86_64 architecture, because:
+    #
+    # 1) Valgrind has floating point limitations, no support for 80 bits math.
+    # 2) Other archs may have the same limits.
+    #
+    # 1.23 cannot be represented correctly with 64 bit doubles, so we skip
+    # the test, since we are only testing pretty printing here and is not
+    # a bug if the program outputs things like 1.299999...
+    if {[string match *x86_64* [exec uname -a]]} {
+        test {Test HINCRBYFLOAT for correct float representation (issue #2846)} {
+            r del myhash
+            assert {[r hincrbyfloat myhash float 1.23] eq {1.23}}
+            assert {[r hincrbyfloat myhash float 0.77] eq {2}}
+            assert {[r hincrbyfloat myhash float -0.1] eq {1.9}}
+        } {} {valgrind:skip}
+    }
+
     test {Hash ziplist of various encodings} {
         r del k
         config_set hash-max-ziplist-entries 1000000000
@@ -915,29 +934,9 @@ start_server {tags {"hash"}} {
         set _ $k
     } {ZIP_INT_8B 127 ZIP_INT_16B 32767 ZIP_INT_32B 2147483647 ZIP_INT_64B 9223372036854775808 ZIP_INT_IMM_MIN 0 ZIP_INT_IMM_MAX 12}
 
-    tags {"valgrind:skip"} {
-        # The following tests can only be executed if we don't use Valgrind, and if
-        # we are using x86_64 architecture, because:
-        #
-        # 1) Valgrind has floating point limitations, no support for 80 bits math.
-        # 2) Other archs may have the same limits.
-        #
-        # 1.23 cannot be represented correctly with 64 bit doubles, so we skip
-        # the test, since we are only testing pretty printing here and is not
-        # a bug if the program outputs things like 1.299999...
-        if {[string match *x86_64* [exec uname -a]]} {
-            test {Test HINCRBYFLOAT for correct float representation (issue #2846)} {
-                r del myhash
-                assert {[r hincrbyfloat myhash float 1.23] eq {1.23}}
-                assert {[r hincrbyfloat myhash float 0.77] eq {2}}
-                assert {[r hincrbyfloat myhash float -0.1] eq {1.9}}
-            }
-        }
-
-        # On some platforms strtold("+inf") with valgrind returns a non-inf result
-        test {HINCRBYFLOAT does not allow NaN or Infinity} {
+    # On some platforms strtold("+inf") with valgrind returns a non-inf result
+    test {HINCRBYFLOAT does not allow NaN or Infinity} {
             assert_error "*value is NaN or Infinity*" {r hincrbyfloat hfoo field +inf}
             assert_equal 0 [r exists hfoo]
-        }
-    }
+    } {} {valgrind:skip}
 }
